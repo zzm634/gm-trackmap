@@ -1,0 +1,21 @@
+{
+  "name": "gmpitwall-trackmap",
+  "version": "1.0.0",
+  "description": "A track-map generator for creating maps from iRacing IBT telemetry",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "babel-polyfill": "^6.26.0",
+    "ibt-telemetry": "^1.1.1",
+    "rxjs": "^7.5.5"
+  },
+  "devDependencies": {
+    "typescript": "^4.7.4",
+    "@types/node": "^18.0.0"
+  }
+}

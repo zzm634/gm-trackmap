@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "target": "es5",
+        "module": "CommonJS",
+        "declaration": true,
+        "outDir": "./lib",
+        "strict": true,
+        "allowJs":true,
+        "baseUrl": ".",
+        "moduleResolution": "node",
+        "paths": {
+            "ibt-telemetry":["node_modules/ibt-telemetry/dist"]
+        }
+    },
+    "include": ["src"],
+    "exclude": ["node_modules"],
+}
