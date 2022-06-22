@@ -1,11 +1,13 @@
 
 require('babel-polyfill');
 import { Telemetry } from "ibt-telemetry";
-import { map, take, from, ReplaySubject, filter, distinct, count, lastValueFrom, groupBy, reduce, toArray, pipe, mergeAll, generate } from "rxjs";
+import { map, take, from, ReplaySubject, filter, distinct, count, lastValueFrom, groupBy, reduce, toArray, pipe, mergeAll, generate, Subject } from "rxjs";
 
 import getPath from 'platform-folders';
 import * as fs from 'node:fs/promises';
 import { Stats } from "node:fs";
+
+import * as YAML from 'yaml';
 
 type Point = {
     lap: number,
@@ -55,27 +57,39 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
     // sort by trackPositionPct
     // write to output
 
-    const t = await Telemetry.fromFile(ibtFilePath);
 
-    const samples = t.samples() as Iterable<Sample>;
+    // apparently dthe telemetry definitions are innacurate, so define what we need
+    const t = (await Telemetry.fromFile(ibtFilePath));
+    const sessionInfo = (t as any).sessionInfo as {
+        WeekendInfo: {
+            SessionID: number,
+            SubSessionID: number,
+            TrackConfigName: string,
+            TrackDisplayName: string,
+            TrackDisplayShortName: string,
+            TrackID: number,
+            TrackName: string,
+            TrackNorthOffset: string, // e.g., "3.4218 rad"
+        }
+    };
 
-    const samples$ = from(samples);
+    console.log("TrackName: ", sessionInfo.WeekendInfo.TrackName);
+    console.log("TrackID: ", sessionInfo.WeekendInfo.TrackID);
 
-    const trackInfo = {
-        name: "Unknown",
-        id: -1,
-        
-    }
+    const samples$ = from(t.samples() as Iterable<Sample>);
 
-    const pointsSource$ = samples$.pipe(map(toPoint), filter(point => point.onTrack));
+    const sampleSubject$ = new Subject<Sample>();
 
-    const points$ = new ReplaySubject<Point>();
+
+    // sampleSubject$.subscribe(sample => console.log(sample.toJSON()));
+
+    const points$ = sampleSubject$.pipe(map(toPoint), filter(point => point.onTrack));
 
     //points$.subscribe(console.log);
 
     // group points based on resolution
 
-    const trackMap = points$.pipe(groupBy((point) => (point.trackPositionPct * resolution) | 0))
+    const trackMap$ = points$.pipe(groupBy((point) => (point.trackPositionPct * resolution) | 0))
         // average each group of points into a single point
         .pipe(map(pointGroup$ => {
             return pointGroup$.pipe(reduce((acc: AveragedPoint, point: Point) => ({
@@ -102,58 +116,54 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
                 return points;
             }));
 
-        
+
 
     const totalLaps$ = points$.pipe(map(point => point.lap), distinct(), count());
-    pointsSource$.subscribe(points$);
+
+    const sampleSubscription = samples$.subscribe(sampleSubject$);
 
     const totalLaps = await lastValueFrom(totalLaps$);
-    const trackArray = await lastValueFrom(trackMap);
+    const trackArray = await lastValueFrom(trackMap$);
 
-    points$.unsubscribe();
+    sampleSubscription.unsubscribe();
 
-    if (normalize) {
+    // normalize map scale to 0-1
 
-        // normalize map scale to 0-1
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLon = Infinity;
+    let maxLon = -Infinity;
 
-        let minLat = Infinity;
-        let maxLat = -Infinity;
-        let minLon = Infinity;
-        let maxLon = -Infinity;
-
-        for (const trackPoint of trackArray) {
-            minLat = Math.min(minLat, trackPoint.lat);
-            minLon = Math.min(minLon, trackPoint.lon);
-            maxLat = Math.max(maxLat, trackPoint.lat);
-            maxLon = Math.max(maxLon, trackPoint.lon);
-        }
-
-        const latRange = maxLat - minLat;
-        const lonRange = maxLon - minLon;
-        const latCenter = (minLat + maxLat) / 2;
-        const lonCenter = (minLon + maxLon) / 2;
-        const scale = Math.max(latRange, lonRange);
-
-        // move every point to the center, then adjust by the scale, then offset by (0.5, 0.5)
-
-        const normalizedTrackArray = trackArray.map(point => ({
-            samples: point.samples,
-            trackPositionPct: point.trackPositionPct,
-            lat: ((point.lat - latCenter) / scale) + 0.5,
-            lon: ((point.lon - lonCenter) / scale) + 0.5
-        }));
-
-
-        return {
-            map: normalizedTrackArray,
-            totalLaps
-        };
+    for (const trackPoint of trackArray) {
+        minLat = Math.min(minLat, trackPoint.lat);
+        minLon = Math.min(minLon, trackPoint.lon);
+        maxLat = Math.max(maxLat, trackPoint.lat);
+        maxLon = Math.max(maxLon, trackPoint.lon);
     }
-    else {
-        return {
-            map: trackArray,
-            totalLaps,
-        }
+
+    const latRange = maxLat - minLat;
+    const lonRange = maxLon - minLon;
+    const latCenter = (minLat + maxLat) / 2;
+    const lonCenter = (minLon + maxLon) / 2;
+    const scale = Math.max(latRange, lonRange);
+
+    // move every point to the center, then adjust by the scale, then offset by (0.5, 0.5)
+
+    const normalizedTrackArray = trackArray.map(point => ({
+        samples: point.samples,
+        trackPositionPct: point.trackPositionPct,
+        lat: point.lat,
+        lon: point.lon,
+        y: ((point.lat - latCenter) / scale) + 0.5,
+        x: ((point.lon - lonCenter) / scale) + 0.5
+    }));
+
+
+
+    return {
+        trackId: sessionInfo.WeekendInfo.TrackID,
+        map: normalizedTrackArray,
+        totalLaps,
     }
 }
 
@@ -163,7 +173,7 @@ const telemPath = getPath('documents') + "\\iRacing\\telemetry";
 
 export async function findLastTelemetryFile(): Promise<string | undefined> {
     const telemDir = await fs.readdir(telemPath);
-    
+
     type FileStats = {
         path: string,
         stats: Stats
@@ -171,11 +181,11 @@ export async function findLastTelemetryFile(): Promise<string | undefined> {
 
     let candidate = null as (FileStats | null);
 
-    for(const telemFile of telemDir) {
+    for (const telemFile of telemDir) {
         const path = telemPath + "\\" + telemFile;
-        if(!telemFile.toLowerCase().endsWith(".ibt")) continue;
+        if (!telemFile.toLowerCase().endsWith(".ibt")) continue;
         const stats = await fs.stat(path);
-        if(candidate == null || candidate.stats.mtimeMs < stats.mtimeMs) {
+        if (candidate == null || candidate.stats.mtimeMs < stats.mtimeMs) {
             candidate = {
                 path,
                 stats,
@@ -186,12 +196,12 @@ export async function findLastTelemetryFile(): Promise<string | undefined> {
     return candidate?.path;
 }
 
-export async function getCurrentTrackMap(minLaps = 2, resolution=100, normalize = true) : Promise<TrackMap | null> {
+export async function getCurrentTrackMap(minLaps = 2, resolution = 100, normalize = true): Promise<TrackMap | null> {
     const currentTelemFile = await findLastTelemetryFile();
-    if(!currentTelemFile) return null;
+    if (!currentTelemFile) return null;
 
     const trackMap = await generateFromFile(currentTelemFile, resolution, normalize);
 
-    if(trackMap.totalLaps < minLaps) return null;
+    if (trackMap.totalLaps < minLaps) return null;
     else return trackMap;
 }
