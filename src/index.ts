@@ -158,8 +158,6 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
         x: ((point.lon - lonCenter) / scale) + 0.5
     }));
 
-
-
     return {
         trackId: sessionInfo.WeekendInfo.TrackID,
         map: normalizedTrackArray,
