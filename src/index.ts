@@ -1,7 +1,11 @@
 
 require('babel-polyfill');
 import { Telemetry } from "ibt-telemetry";
-import { map, take, from, ReplaySubject, filter, distinct, count, lastValueFrom, groupBy, reduce, toArray, pipe, mergeAll } from "rxjs";
+import { map, take, from, ReplaySubject, filter, distinct, count, lastValueFrom, groupBy, reduce, toArray, pipe, mergeAll, generate } from "rxjs";
+
+import getPath from 'platform-folders';
+import * as fs from 'node:fs/promises';
+import { Stats } from "node:fs";
 
 type Point = {
     lap: number,
@@ -57,12 +61,15 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
 
     const samples$ = from(samples);
 
-    //samples$.pipe(map(sample => sample.toJSON())).subscribe(console.log);
+    const trackInfo = {
+        name: "Unknown",
+        id: -1,
+        
+    }
 
     const pointsSource$ = samples$.pipe(map(toPoint), filter(point => point.onTrack));
 
     const points$ = new ReplaySubject<Point>();
-    pointsSource$.subscribe(points$);
 
     //points$.subscribe(console.log);
 
@@ -95,8 +102,12 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
                 return points;
             }));
 
+        
 
-    const totalLaps = await lastValueFrom(points$.pipe(map(point => point.lap), distinct(), count()));
+    const totalLaps$ = points$.pipe(map(point => point.lap), distinct(), count());
+    pointsSource$.subscribe(points$);
+
+    const totalLaps = await lastValueFrom(totalLaps$);
     const trackArray = await lastValueFrom(trackMap);
 
     points$.unsubscribe();
@@ -146,10 +157,41 @@ export async function generateFromFile(ibtFilePath: string, resolution: number, 
     }
 }
 
-import * as fs from 'fs';
+export type TrackMap = Awaited<ReturnType<typeof generateFromFile>>;
 
-const telemetryFile = "C:/Users/zm/Documents/iRacing/telemetry/dallarap217_watkinsglen 2021 fullcourse 2022-06-17 20-13-00.ibt"
+const telemPath = getPath('documents') + "\\iRacing\\telemetry";
 
-generateFromFile(telemetryFile, 500, true).then((map) => {
-    fs.writeFile("./map-out.json", JSON.stringify(map), console.error);
-});
+export async function findLastTelemetryFile(): Promise<string | undefined> {
+    const telemDir = await fs.readdir(telemPath);
+    
+    type FileStats = {
+        path: string,
+        stats: Stats
+    }
+
+    let candidate = null as (FileStats | null);
+
+    for(const telemFile of telemDir) {
+        const path = telemPath + "\\" + telemFile;
+        if(!telemFile.toLowerCase().endsWith(".ibt")) continue;
+        const stats = await fs.stat(path);
+        if(candidate == null || candidate.stats.mtimeMs < stats.mtimeMs) {
+            candidate = {
+                path,
+                stats,
+            };
+        }
+    }
+
+    return candidate?.path;
+}
+
+export async function getCurrentTrackMap(minLaps = 2, resolution=100, normalize = true) : Promise<TrackMap | null> {
+    const currentTelemFile = await findLastTelemetryFile();
+    if(!currentTelemFile) return null;
+
+    const trackMap = await generateFromFile(currentTelemFile, resolution, normalize);
+
+    if(trackMap.totalLaps < minLaps) return null;
+    else return trackMap;
+}
