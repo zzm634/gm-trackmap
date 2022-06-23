@@ -7,8 +7,6 @@ import getPath from 'platform-folders';
 import * as fs from 'node:fs/promises';
 import { Stats } from "node:fs";
 
-import * as YAML from 'yaml';
-
 type Point = {
     lap: number,
     trackPositionPct: number,

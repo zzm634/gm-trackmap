@@ -1,5 +1,5 @@
 {
-  "name": "gmpitwall-trackmap",
+  "name": "gm-trackmap",
   "version": "0.0.4",
   "description": "A track-map generator for creating maps from iRacing IBT telemetry",
   "main": "index.js",
@@ -14,8 +14,7 @@
     "babel-polyfill": "^6.26.0",
     "ibt-telemetry": "^1.1.1",
     "platform-folders": "^0.6.0",
-    "rxjs": "^7.5.5",
-    "yaml": "^2.1.1"
+    "rxjs": "^7.5.5"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
