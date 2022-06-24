@@ -22,4 +22,4 @@ import * as TrackMap from './index';
 //         minLat, maxLat, minLon, maxLon
 //     });
 // });
-TrackMap.getCurrentTrackMap(5, 500, false).then(map => fs.writeFile("./map-out.json", JSON.stringify(map), console.error));
+TrackMap.getCurrentTrackMap(500).then(map => fs.writeFile("./map-out.json", JSON.stringify(map), console.error));
